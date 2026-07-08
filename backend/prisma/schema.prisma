@@ -1,0 +1,296 @@
+// ==========================================
+// Bro Pizza — Prisma Database Schema
+// Full production schema for PostgreSQL
+// ==========================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Enums ---
+
+enum UserRole {
+  CUSTOMER
+  ADMIN
+  STAFF
+}
+
+enum OrderType {
+  DINE_IN
+  TAKEAWAY
+  DELIVERY
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  COD
+  UPI
+  ONLINE
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum CouponType {
+  PERCENTAGE
+  FLAT
+}
+
+enum RewardType {
+  EARNED
+  REDEEMED
+}
+
+enum NotificationType {
+  ORDER
+  PROMOTION
+  SYSTEM
+}
+
+// --- Models ---
+
+model User {
+  id            String   @id @default(cuid())
+  name          String
+  phone         String   @unique
+  email         String?  @unique
+  passwordHash  String?
+  role          UserRole @default(CUSTOMER)
+  rewardPoints  Int      @default(0)
+  isBlocked     Boolean  @default(false)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  addresses     Address[]
+  orders        Order[]
+  reviews       Review[]
+  notifications Notification[]
+  rewardHistory RewardPoints[]
+  favorites     FavoriteItem[]
+
+  @@index([phone])
+  @@index([role])
+  @@map("users")
+}
+
+model Address {
+  id        String   @id @default(cuid())
+  userId    String
+  label     String   // Home, Office, etc.
+  street    String
+  city      String
+  pincode   String
+  lat       Float?
+  lng       Float?
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@map("addresses")
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  icon      String   // emoji or icon name
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  menuItems MenuItem[]
+
+  @@map("categories")
+}
+
+model MenuItem {
+  id            String   @id @default(cuid())
+  categoryId    String
+  name          String
+  slug          String   @unique
+  description   String
+  price         Int      // Price in paise (or rupees for simplicity)
+  discountPrice Int?
+  image         String?
+  isVeg         Boolean  @default(true)
+  spiceLevel    Int      @default(0) // 0-3
+  rating        Float    @default(0)
+  ratingCount   Int      @default(0)
+  isAvailable   Boolean  @default(true)
+  isFeatured    Boolean  @default(false)
+  isRecommended Boolean  @default(false)
+  isBestseller  Boolean  @default(false)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  category   Category      @relation(fields: [categoryId], references: [id])
+  orderItems OrderItem[]
+  reviews    Review[]
+  favorites  FavoriteItem[]
+
+  @@index([categoryId])
+  @@index([slug])
+  @@index([isAvailable])
+  @@map("menu_items")
+}
+
+model Order {
+  id             String        @id @default(cuid())
+  orderNumber    String        @unique
+  userId         String
+  type           OrderType
+  status         OrderStatus   @default(PENDING)
+  subtotal       Int
+  tax            Int
+  deliveryCharge Int           @default(0)
+  discount       Int           @default(0)
+  total          Int
+  couponId       String?
+  addressId      String?
+  paymentMethod  PaymentMethod
+  paymentStatus  PaymentStatus @default(PENDING)
+  notes          String?
+  estimatedTime  Int?          // minutes
+  deliveredAt    DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  user    User       @relation(fields: [userId], references: [id])
+  address Address?   @relation(fields: [addressId], references: [id])
+  coupon  Coupon?    @relation(fields: [couponId], references: [id])
+  items   OrderItem[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([orderNumber])
+  @@map("orders")
+}
+
+model OrderItem {
+  id         String @id @default(cuid())
+  orderId    String
+  menuItemId String
+  name       String // Denormalized for history
+  price      Int
+  quantity   Int
+  isVeg      Boolean
+
+  order    Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id])
+
+  @@map("order_items")
+}
+
+model Coupon {
+  id          String     @id @default(cuid())
+  code        String     @unique
+  type        CouponType
+  value       Int        // percentage or flat amount
+  minOrder    Int        @default(0)
+  maxDiscount Int?       // max discount for percentage coupons
+  usageLimit  Int        @default(100)
+  usedCount   Int        @default(0)
+  expiresAt   DateTime
+  isActive    Boolean    @default(true)
+  description String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  orders Order[]
+
+  @@index([code])
+  @@map("coupons")
+}
+
+model Inventory {
+  id                String   @id @default(cuid())
+  name              String   @unique
+  unit              String   // kg, litre, pcs, etc.
+  quantity          Float
+  lowStockThreshold Float
+  lastRestocked     DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("inventory")
+}
+
+model Review {
+  id         String   @id @default(cuid())
+  userId     String
+  menuItemId String?
+  rating     Int      // 1-5
+  comment    String?
+  createdAt  DateTime @default(now())
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  menuItem MenuItem? @relation(fields: [menuItemId], references: [id])
+
+  @@index([menuItemId])
+  @@map("reviews")
+}
+
+model RewardPoints {
+  id        String     @id @default(cuid())
+  userId    String
+  points    Int
+  orderId   String?
+  type      RewardType
+  createdAt DateTime   @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("reward_points")
+}
+
+model FavoriteItem {
+  id         String   @id @default(cuid())
+  userId     String
+  menuItemId String
+  createdAt  DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, menuItemId])
+  @@map("favorite_items")
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
